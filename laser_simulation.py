@@ -1,16 +1,19 @@
-import numpy as np
+﻿import numpy as np
 from scipy.special import erf
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from matplotlib.colors import Normalize
 from matplotlib.widgets import Button, RadioButtons, Slider
 
+# ── Display toggles ─────────────────────────────────────────────────────────
+SHOW_DETECTED_MARKERS = False   # show t₁+d₁/c and t₂+d₂/c arrival markers
+
 # ── Physical parameters ──────────────────────────────────────────────────────
-d      = 3.0          # laser to wall distance  [m]
+d      = 3.0          # laser → wall distance  [m]
 c      = 3e8          # speed of light  [m/s]
-x_pmt  = d/2          # PMT x-position along beam  [m]
+x_det  = d/2          # Detector x-position along beam  [m]
 y_beam = 0.0          # beam axis y  [m]
-y_pmt  = -0.65        # PMT y (bottom of scene)  [m]
+y_det  = -0.65        # Detector y (bottom of scene)  [m]
 R_wall = 0.65         # wall reflectivity
 
 s_sc   = 0.38         # scatter spatial scale  [m]   (controls halo width)
@@ -50,22 +53,22 @@ dx_baseline = None
 c_geom = None
 
 def recompute_detector_geometry():
-    """Update PMT-dependent geometry/timing values when PMT x changes."""
+    """Update Detector-dependent geometry/timing values when Detector x changes."""
     global line_r2, t1_true, t2_true, dt_true, d_1, d_2, t1_det, t2_det
     global dx_baseline, c_geom
-    line_r2 = (xg - x_pmt)**2 + y_pmt**2
+    line_r2 = (xg - x_det)**2 + y_det**2
 
-    t1_true = x_pmt / c
-    t2_true = (2 * d - x_pmt) / c
+    t1_true = x_det / c
+    t2_true = (2 * d - x_det) / c
     dt_true = t2_true - t1_true
-    dx_baseline = d - x_pmt
+    dx_baseline = d - x_det
     c_geom = 2.0 * dx_baseline / dt_true
 
-    dist_laser_to_pmt = np.sqrt(x_pmt**2 + (y_pmt - y_beam)**2)
-    d_1 = dist_laser_to_pmt - x_pmt
+    dist_laser_to_det = np.sqrt(x_det**2 + (y_det - y_beam)**2)
+    d_1 = dist_laser_to_det - x_det
 
-    dist_wall_to_pmt = np.sqrt((d - x_pmt)**2 + (y_pmt - y_beam)**2)
-    d_2 = dist_wall_to_pmt - abs(d - x_pmt)
+    dist_wall_to_det = np.sqrt((d - x_det)**2 + (y_det - y_beam)**2)
+    d_2 = dist_wall_to_det - abs(d - x_det)
 
     t1_det = t1_true + d_1 / c
     t2_det = t2_true + d_2 / c
@@ -134,15 +137,15 @@ def core_from_profile(profile, amp=1.0):
     beam_width = params['beam_width']
     return amp * np.exp(-0.5 * (YY / beam_width)**2) * profile[None, :]
 
-def pmt_signal_from_profile(profile):
-    """Numerical PMT signal from a distributed beam-axis intensity profile."""
+def det_signal_from_profile(profile):
+    """Numerical Detector signal from a distributed beam-axis intensity profile."""
     return float(np.sum(profile / np.maximum(line_r2, 1e-4)) * dx)
 
-def pmt_signal_from_map(field):
-    """PMT signal sampled directly from the rendered 2D intensity map near the PMT."""
-    # Finite PMT aperture (Gaussian weighting) gives a stable, pixel-based readout.
+def det_signal_from_map(field):
+    """Detector signal sampled directly from the rendered 2D intensity map near the Detector."""
+    # Finite Detector aperture (Gaussian weighting) gives a stable, pixel-based readout.
     aperture_sigma = 0.04
-    r2 = (XX - x_pmt)**2 + (YY - y_pmt)**2
+    r2 = (XX - x_det)**2 + (YY - y_det)**2
     weights = np.exp(-0.5 * r2 / (aperture_sigma**2))
     wsum = np.sum(weights)
     if wsum <= 1e-12:
@@ -187,17 +190,17 @@ def reflected_pulse_profile(t):
     envelope = np.exp(-0.5 * ((xg - cr) / pulse_length)**2)
     return R_wall * source_ramp(retarded_time) * envelope * x_line_mask
 
-# ── PMT signal helpers ────────────────────────────────────────────────────────
-def pmt_inv_sq(cx):
-    """1/r² from moving point source at (cx,0) to PMT."""
-    r2 = (cx - x_pmt)**2 + y_pmt**2
+# ── Detector signal helpers ────────────────────────────────────────────────────────
+def det_inv_sq(cx):
+    """1/r² from moving point source at (cx,0) to Detector."""
+    r2 = (cx - x_det)**2 + y_det**2
     return 1.0 / max(r2, 1e-4)
 
-def pmt_beam_integral(x_lo, x_hi):
+def det_beam_integral(x_lo, x_hi):
     """∫_{x_lo}^{x_hi} 1/r² dx'  (analytic arctan form)."""
-    yp = abs(y_pmt)
-    return (np.arctan((x_hi - x_pmt) / yp)
-           - np.arctan((x_lo - x_pmt) / yp)) / yp
+    yp = abs(y_det)
+    return (np.arctan((x_hi - x_det) / yp)
+           - np.arctan((x_lo - x_det) / yp)) / yp
 
 # ── Per-frame computation — retarded-time model ───────────────────────────────
 def compute_retarded(t, mode):
@@ -246,7 +249,7 @@ def compute_retarded(t, mode):
     F = (0.80 * glow * (f_glow_fwd + f_glow_ref) +
          0.55 * core * (f_core_fwd + f_core_ref))
     F *= wall_mask
-    v = pmt_signal_from_map(F)
+    v = det_signal_from_map(F)
     return np.clip(F, 0, 2.0), float(v)
 
 
@@ -313,14 +316,16 @@ src_trace_disc = source_ramp(t_disc_arr)
 # ── Figure layout ─────────────────────────────────────────────────────────────
 BG = '#0d0d1a'; TX = '#ccccdd'
 fig = plt.figure(figsize=(13.5, 7.2), facecolor=BG)
-fig.suptitle("PE3 Speed of Light Experiment — Single-Pixel PMT Simulation",
+fig.suptitle("PE3 Speed of Light Experiment — Single-Pixel Detector Simulation",
              color='white', fontsize=11, y=0.985)
 
 ax_map = fig.add_axes([0.05, 0.10, 0.60, 0.82])   # heatmap
-ax_sig = fig.add_axes([0.70, 0.10, 0.28, 0.26])   # PMT signal
+ax_sig = fig.add_axes([0.70, 0.10, 0.28, 0.26])   # Detector signal
 ax_src = fig.add_axes([0.70, 0.43, 0.28, 0.14])   # source intensity
 ax_rad = fig.add_axes([0.70, 0.614, 0.28, 0.316],   # laser settings
                       facecolor='#12122a')
+ax_save_btn = fig.add_axes([0.70,   0.010, 0.135, 0.035])  # save PNG button
+ax_csv_btn  = fig.add_axes([0.843,  0.010, 0.137, 0.035])  # save CSV button
 
 for ax in (ax_map, ax_sig, ax_src):
     ax.set_facecolor(BG)
@@ -338,19 +343,19 @@ ax_map.axvline(d, color='#00cfff', lw=2.5, zorder=3, label='Wall')
 ax_map.axvline(0, color='#39ff14', lw=1.5, ls='--', alpha=0.6, zorder=3, label='Laser')
 ax_map.axhline(y_beam, color='white', lw=0.4, ls=':', alpha=0.18)
 
-# PMT at the bottom
-pmt_marker, = ax_map.plot(
-    x_pmt, y_pmt, 'D', ms=11, color='#ff6060',
+# Detector at the bottom
+det_marker, = ax_map.plot(
+    x_det, y_det, 'D', ms=11, color='#ff6060',
     markeredgecolor='white', markeredgewidth=0.7, zorder=6
 )
-pmt_label = ax_map.annotate(
-    'PMT', xy=(x_pmt, y_pmt),
-    xytext=(x_pmt + 0.12, y_pmt + 0.04),
+det_label = ax_map.annotate(
+    'Detector', xy=(x_det, y_det),
+    xytext=(x_det + 0.12, y_det + 0.04),
     color='#ff6060', fontsize=9, fontweight='bold', zorder=7
 )
-# Dashed guide line from PMT to beam axis
-pmt_guide, = ax_map.plot(
-    [x_pmt, x_pmt], [y_pmt + 0.08, y_beam - 0.03],
+# Dashed guide line from Detector to beam axis
+det_guide, = ax_map.plot(
+    [x_det, x_det], [y_det + 0.08, y_beam - 0.03],
     color='#ff6060', ls=':', lw=1.0, alpha=0.40
 )
 
@@ -372,26 +377,30 @@ mlbl = ax_map.text(0.50, 0.96, 'Mode: Beam', transform=ax_map.transAxes,
 map_title = ax_map.set_title('Top-down view: laser scatter',
                               color=TX, fontsize=10, pad=5)
 
-# ── PMT signal plot ───────────────────────────────────────────────────────────
+# ── Detector signal plot ───────────────────────────────────────────────────────────
 ax_sig.set_xlim(0, t_ns[-1]); ax_sig.set_ylim(-1.05, 1.22)
 ax_sig.set_xlabel('Time (ns)', color=TX, fontsize=9)
-ax_sig.set_ylabel('PMT signal', color=TX, fontsize=9)
+ax_sig.set_ylabel('Detector signal', color=TX, fontsize=9)
 ax_sig.axhline(0, color='#334', lw=0.7)
 
 t1_true_line = ax_sig.axvline(t1_true * 1e9, color='#ffdd44', lw=1.2, ls='--', alpha=0.65)
 t2_true_line = ax_sig.axvline(t2_true * 1e9, color='#ff8844', lw=1.2, ls='--', alpha=0.65)
-t1_det_line = ax_sig.axvline(t1_det * 1e9, color='#ffe88a', lw=1.2, ls=':', alpha=0.85)
-t2_det_line = ax_sig.axvline(t2_det * 1e9, color='#ffb07a', lw=1.2, ls=':', alpha=0.85)
+t1_det_line = ax_sig.axvline(t1_det * 1e9, color='#ffe88a', lw=1.2, ls=':', alpha=0.85,
+                             visible=SHOW_DETECTED_MARKERS)
+t2_det_line = ax_sig.axvline(t2_det * 1e9, color='#ffb07a', lw=1.2, ls=':', alpha=0.85,
+                             visible=SHOW_DETECTED_MARKERS)
 t1_true_text = ax_sig.text(t1_true*1e9 + 0.10, 1.10, 't₁', color='#ffdd44', fontsize=9)
 t2_true_text = ax_sig.text(t2_true*1e9 + 0.10, 1.10, 't₂', color='#ff8844', fontsize=9)
-t1_det_text = ax_sig.text(t1_det*1e9 + 0.10, 1.00, 't₁ + d₁/c', color='#ffe88a', fontsize=8.5)
-t2_det_text = ax_sig.text(t2_det*1e9 + 0.10, 1.00, 't₂ + d₂/c', color='#ffb07a', fontsize=8.5)
+t1_det_text = ax_sig.text(t1_det*1e9 + 0.10, 1.00, 't₁ + d₁/c', color='#ffe88a', fontsize=8.5,
+                          visible=SHOW_DETECTED_MARKERS)
+t2_det_text = ax_sig.text(t2_det*1e9 + 0.10, 1.00, 't₂ + d₂/c', color='#ffb07a', fontsize=8.5,
+                          visible=SHOW_DETECTED_MARKERS)
 sig_line, = ax_sig.plot([], [], color='#66ccff', lw=1.8, label='Signal')
 dsig_line, = ax_sig.plot([], [], color='#c77dff', lw=1.2, ls='--', alpha=0.95,
                          label='d(signal)/dt (norm)')
 sig_legend = ax_sig.legend(loc='lower right', fontsize=7.5, framealpha=0.20,
                           facecolor='#1a1a2e')
-sig_title = ax_sig.set_title('PMT readout  (Beam)', color=TX, fontsize=9.5, pad=4)
+sig_title = ax_sig.set_title('Detector readout  (Beam)', color=TX, fontsize=9.5, pad=4)
 
 # ── Laser source intensity plot ──────────────────────────────────────────────
 ax_src.set_xlim(0, t_ns[-1]); ax_src.set_ylim(-0.05, 1.05)
@@ -447,12 +456,12 @@ pulse_slider.valtext.set_visible(False)
 
 detector_slider = Slider(
     ax_detx, '', 0.0, d,
-    valinit=x_pmt, valstep=0.01,
+    valinit=x_det, valstep=0.01,
     valfmt='%.3g', color='#dc267f'
 )
-ax_detx.text(0.0, 1.05, 'PMT x position', transform=ax_detx.transAxes,
+ax_detx.text(0.0, 1.05, 'Detector x position', transform=ax_detx.transAxes,
     ha='left', va='bottom', color=TX, fontsize=8, clip_on=False)
-detx_val_text = ax_detx.text(1.0, 1.05, f'{x_pmt:.2f} m',
+detx_val_text = ax_detx.text(1.0, 1.05, f'{x_det:.2f} m',
     transform=ax_detx.transAxes, ha='right', va='bottom',
     color=TX, fontsize=8, clip_on=False)
 detector_slider.valtext.set_visible(False)
@@ -485,17 +494,29 @@ for axis in (ax_mode, ax_sample, ax_beam, ax_pulse, ax_detx, ax_tc, ax_speed):
     axis.tick_params(colors=TX, labelsize=8)
     for sp in axis.spines.values(): sp.set_edgecolor('#445')
 
+save_btn = Button(ax_save_btn, 'Save PNG', color='#1a1a2e', hovercolor='#252550')
+save_btn.label.set_color(TX)
+save_btn.label.set_fontsize(8.5)
+ax_save_btn.set_facecolor('#1a1a2e')
+for sp in ax_save_btn.spines.values(): sp.set_edgecolor('#445')
+
+csv_btn = Button(ax_csv_btn, 'Save CSV', color='#1a1a2e', hovercolor='#252550')
+csv_btn.label.set_color(TX)
+csv_btn.label.set_fontsize(8.5)
+ax_csv_btn.set_facecolor('#1a1a2e')
+for sp in ax_csv_btn.spines.values(): sp.set_edgecolor('#445')
+
 def refresh_detector_overlays():
-    """Refresh PMT marker and timing overlays after PMT x-position changes."""
+    """Refresh Detector marker and timing overlays after Detector x-position changes."""
     t1_ns = t1_true * 1e9
     t2_ns = t2_true * 1e9
     t1_det_ns = t1_det * 1e9
     t2_det_ns = t2_det * 1e9
 
-    pmt_marker.set_xdata([x_pmt])
-    pmt_guide.set_xdata([x_pmt, x_pmt])
-    pmt_label.xy = (x_pmt, y_pmt)
-    pmt_label.set_position((x_pmt + 0.12, y_pmt + 0.04))
+    det_marker.set_xdata([x_det])
+    det_guide.set_xdata([x_det, x_det])
+    det_label.xy = (x_det, y_det)
+    det_label.set_position((x_det + 0.12, y_det + 0.04))
 
     t1_true_line.set_xdata([t1_ns, t1_ns])
     t2_true_line.set_xdata([t2_ns, t2_ns])
@@ -561,7 +582,7 @@ def render_frame(i):
             sig_line.set_data(x_sig, pV[:i+1])
             dsig_line.set_data(x_sig, pD[:i+1])
         mlbl.set_text('Mode: Pulse')
-        sig_title.set_text('PMT readout  (Pulse)')
+        sig_title.set_text('Detector readout  (Pulse)')
         sig_line.set_color('#ffdd44')
         dsig_line.set_color('#38d9a9')
         for handle, txt, col in zip(sig_legend.legend_handles, sig_legend.get_texts(), ['#ffdd44', '#38d9a9']):
@@ -576,7 +597,7 @@ def render_frame(i):
             sig_line.set_data(x_sig, bV[:i+1])
             dsig_line.set_data(x_sig, bD[:i+1])
         mlbl.set_text('Mode: Beam')
-        sig_title.set_text('PMT readout  (Beam)')
+        sig_title.set_text('Detector readout  (Beam)')
         sig_line.set_color('#66ccff')
         dsig_line.set_color('#c77dff')
         for handle, txt, col in zip(sig_legend.legend_handles, sig_legend.get_texts(), ['#66ccff', '#c77dff']):
@@ -614,9 +635,9 @@ def on_laser_shape_change(_value):
     fig.canvas.draw_idle()
 
 def on_detector_change(_value):
-    global x_pmt, pI, pV, pD, pV_disc, pD_disc, bI, bV, bD, bV_disc, bD_disc
-    x_pmt = detector_slider.val
-    detx_val_text.set_text(f'{x_pmt:.2f} m')
+    global x_det, pI, pV, pD, pV_disc, pD_disc, bI, bV, bD, bV_disc, bD_disc
+    x_det = detector_slider.val
+    detx_val_text.set_text(f'{x_det:.2f} m')
     recompute_detector_geometry()
     refresh_detector_overlays()
     pI, pV, pD, pV_disc, pD_disc, bI, bV, bD, bV_disc, bD_disc = recompute_all_frames()
@@ -632,6 +653,91 @@ def on_speed_change(_value):
     state['playback_rate'] = speed_slider.val
     speed_val_text.set_text(f'{speed_slider.val:.2f}×')
     fig.canvas.draw_idle()
+
+def on_save_detector(_event):
+    import datetime, threading, time
+    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    fname = rf't:\downloads\det_signal_{timestamp}.png'
+
+    mode = state['mode']
+    sampling_mode = state['sampling_mode']
+    discrete_mode = sampling_mode == 'Discrete (1 ns)'
+
+    if discrete_mode:
+        x_full = t_disc_ns
+        V_full = pV_disc if mode == 'Pulse' else bV_disc
+        D_full = pD_disc if mode == 'Pulse' else bD_disc
+        ls_sig, ls_dsig, mk_sig, mk_dsig = 'None', 'None', 'o', 's'
+    else:
+        x_full = t_ns
+        V_full = pV if mode == 'Pulse' else bV
+        D_full = pD if mode == 'Pulse' else bD
+        ls_sig, ls_dsig, mk_sig, mk_dsig = '-', '--', 'None', 'None'
+
+    sc = sig_line.get_color()
+    dc = dsig_line.get_color()
+
+    fig2, ax2 = plt.subplots(figsize=(8, 4), facecolor=BG)
+    ax2.set_facecolor(BG)
+    ax2.axhline(0, color='#334', lw=0.7)
+    ax2.axvline(t1_true * 1e9, color='#ffdd44', lw=1.2, ls='--', alpha=0.65)
+    ax2.axvline(t2_true * 1e9, color='#ff8844', lw=1.2, ls='--', alpha=0.65)
+    if SHOW_DETECTED_MARKERS:
+        ax2.axvline(t1_det  * 1e9, color='#ffe88a', lw=1.2, ls=':',  alpha=0.85)
+        ax2.axvline(t2_det  * 1e9, color='#ffb07a', lw=1.2, ls=':',  alpha=0.85)
+    ax2.plot(x_full, V_full, color=sc, lw=1.8,
+             ls=ls_sig, marker=mk_sig, markersize=3.0, label='Signal')
+    ax2.plot(x_full, D_full, color=dc, lw=1.2, alpha=0.95,
+             ls=ls_dsig, marker=mk_dsig, markersize=2.8, label='d(signal)/dt  (norm.)')
+    ax2.text(t1_true*1e9 + 0.15, 1.10, 't\u2081',        color='#ffdd44', fontsize=10)
+    ax2.text(t2_true*1e9 + 0.15, 1.10, 't\u2082',        color='#ff8844', fontsize=10)
+    if SHOW_DETECTED_MARKERS:
+        ax2.text(t1_det *1e9 + 0.15, 1.00, 't\u2081 + d\u2081/c', color='#ffe88a', fontsize=9)
+        ax2.text(t2_det *1e9 + 0.15, 1.00, 't\u2082 + d\u2082/c', color='#ffb07a', fontsize=9)
+    ax2.set_xlim(0, t_ns[-1])
+    ax2.set_ylim(-1.05, 1.22)
+    ax2.set_xlabel('Time (ns)', color=TX, fontsize=11)
+    ax2.set_ylabel('Detector signal', color=TX, fontsize=11)
+    ax2.set_title(f'Detector readout  ({mode})', color=TX, fontsize=12, pad=5)
+    ax2.tick_params(colors=TX, labelsize=10)
+    for sp in ax2.spines.values(): sp.set_edgecolor('#445')
+    leg = ax2.legend(loc='lower right', fontsize=9.5, framealpha=0.20, facecolor='#1a1a2e')
+    for txt in leg.get_texts(): txt.set_color(TX)
+    fig2.tight_layout()
+    fig2.savefig(fname, dpi=200, facecolor=BG)
+    plt.close(fig2)
+
+    save_btn.label.set_text('Saved!')
+    fig.canvas.draw_idle()
+    def _reset():
+        time.sleep(2.5)
+        save_btn.label.set_text('Save PNG')
+        fig.canvas.draw_idle()
+    threading.Thread(target=_reset, daemon=True).start()
+
+save_btn.on_clicked(on_save_detector)
+
+def on_save_csv(_event):
+    import datetime, csv, threading, time
+    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    mode = state['mode']
+    V_disc = pV_disc if mode == 'Pulse' else bV_disc
+    D_disc = pD_disc if mode == 'Pulse' else bD_disc
+    fname = rf't:\downloads\det_discrete_{mode.lower()}_{timestamp}.csv'
+    with open(fname, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['time_ns', 'signal', 'derivative_norm'])
+        for t, v, dv in zip(t_disc_ns, V_disc, D_disc):
+            writer.writerow([f'{t:.6g}', f'{v:.8g}', f'{dv:.8g}'])
+    csv_btn.label.set_text('Saved!')
+    fig.canvas.draw_idle()
+    def _reset():
+        time.sleep(2.5)
+        csv_btn.label.set_text('Save CSV')
+        fig.canvas.draw_idle()
+    threading.Thread(target=_reset, daemon=True).start()
+
+csv_btn.on_clicked(on_save_csv)
 
 radio.on_clicked(on_radio)
 sampling_radio.on_clicked(on_sampling_change)
